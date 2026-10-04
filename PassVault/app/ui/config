@@ -1,0 +1,13 @@
+{
+  ".url": {
+    "PassVault.main": {
+      "title": "密码管家",
+      "icon": "images/icon_{0}.png",
+      "type": "iframe",
+      "protocol": "http",
+      "port": "9100",
+      "url": "/",
+      "allUsers": true
+    }
+  }
+}

@@ -1,0 +1,127 @@
+#!/bin/bash
+
+LOG_FILE="${TRIM_PKGVAR}/app.log"
+PID_FILE="${TRIM_PKGVAR}/app.pid"
+APP_DIR="${TRIM_APPDEST}/server"
+WEB_DIR="${TRIM_APPDEST}/www"
+DATA_DIR="${TRIM_PKGVAR}"
+PORT="${TRIM_SERVICE_PORT:-9100}"
+
+log_msg() {
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "$LOG_FILE"
+}
+
+# Pick the right static binary. fnOS may report TRIM_SYS_ARCH as x86,
+# x86_64, arm64, aarch64, arm, armv7, ... so match broadly.
+detect_bin() {
+    local arch="${TRIM_SYS_ARCH:-}"
+    if [ -z "$arch" ]; then
+        arch="$(uname -m)"
+    fi
+    case "$arch" in
+        x86_64|amd64|x86)          echo "passvault-amd64" ;;
+        i386|i486|i586|i686)       echo "passvault-386" ;;
+        aarch64|arm64)             echo "passvault-arm64" ;;
+        arm|armv5*|armv6*|armv7*)  echo "passvault-armv7" ;;
+        *)                         echo "" ;;
+    esac
+}
+
+BIN_NAME="$(detect_bin)"
+BIN_PATH="${APP_DIR}/${BIN_NAME}"
+
+check_process() {
+    kill -0 "$1" 2>/dev/null
+}
+
+status_app() {
+    if [ -f "$PID_FILE" ]; then
+        local pid
+        pid="$(head -n 1 "$PID_FILE" | tr -d '[:space:]')"
+        if [ -n "$pid" ] && check_process "$pid"; then
+            return 0
+        fi
+        rm -f "$PID_FILE"
+    fi
+    return 1
+}
+
+start_app() {
+    if status_app; then
+        return 0
+    fi
+
+    if [ -z "$BIN_NAME" ]; then
+        echo "Unsupported CPU architecture: ${TRIM_SYS_ARCH:-$(uname -m)}" > "$TRIM_TEMP_LOGFILE"
+        log_msg "unsupported architecture: ${TRIM_SYS_ARCH:-$(uname -m)}"
+        return 1
+    fi
+
+    if [ ! -f "$BIN_PATH" ]; then
+        echo "Missing server binary: $BIN_NAME" > "$TRIM_TEMP_LOGFILE"
+        log_msg "missing binary: $BIN_PATH"
+        return 1
+    fi
+    if [ ! -x "$BIN_PATH" ]; then
+        chmod +x "$BIN_PATH" 2>/dev/null
+    fi
+
+    mkdir -p "$DATA_DIR" 2>/dev/null
+
+    log_msg "Starting PassVault ($BIN_NAME) on port $PORT"
+    cd "$DATA_DIR" || return 1
+    TRIM_SERVICE_PORT="$PORT" DATA_DIR="$DATA_DIR" WEB_DIR="$WEB_DIR" \
+        "$BIN_PATH" >> "$LOG_FILE" 2>&1 &
+    echo "$!" > "$PID_FILE"
+    return 0
+}
+
+stop_app() {
+    log_msg "Stopping PassVault..."
+
+    if [ ! -f "$PID_FILE" ]; then
+        return 0
+    fi
+
+    local pid
+    pid="$(head -n 1 "$PID_FILE" | tr -d '[:space:]')"
+
+    if [ -z "$pid" ] || ! check_process "$pid"; then
+        rm -f "$PID_FILE"
+        return 0
+    fi
+
+    kill -TERM "$pid" 2>> "$LOG_FILE" || true
+
+    local count=0
+    while check_process "$pid" && [ "$count" -lt 10 ]; do
+        sleep 1
+        count=$((count + 1))
+    done
+
+    if check_process "$pid"; then
+        kill -KILL "$pid" 2>> "$LOG_FILE" || true
+    fi
+
+    rm -f "$PID_FILE"
+    return 0
+}
+
+case "$1" in
+    start)
+        start_app
+        ;;
+    stop)
+        stop_app
+        ;;
+    status)
+        if status_app; then
+            exit 0
+        fi
+        exit 3
+        ;;
+    *)
+        echo "Unknown command: $1" > "$TRIM_TEMP_LOGFILE"
+        exit 1
+        ;;
+esac
