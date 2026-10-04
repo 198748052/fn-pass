@@ -10,9 +10,14 @@
     unlocked: false,
     platforms: [],
     accounts: [],
+    memos: [],
     activePlatform: "all",
+    activeMemo: null,
+    view: "passwords",
     search: "",
   };
+
+  let memoSaveTimer = null;
 
   const ICONS = {
     key: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="7.5" cy="15.5" r="4.5"></circle><path d="m10.5 12.5 8-8M16 5l3 3M14 7l3 3"></path></svg>',
@@ -25,6 +30,9 @@
     trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2m2 0v14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V6"></path></svg>',
     vault: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2.5"></rect><circle cx="12" cy="12" r="4"></circle><path d="M12 8v1M12 15v1M8 12h1M15 12h1"></path></svg>',
     layers: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 2 9 5-9 5-9-5 9-5z"></path><path d="m3 12 9 5 9-5"></path><path d="m3 17 9 5 9-5"></path></svg>',
+    plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg>',
+    note: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><path d="M14 3v6h6M8 13h8M8 17h5"></path></svg>',
+    thumbtack: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4h6l-1 6 3 3v2H7v-2l3-3-1-6z"></path><path d="M12 15v5"></path></svg>',
   };
 
   const PALETTE = ["#4f6ef7", "#12b76a", "#f5a524", "#e5484d", "#9a5cf5", "#0ea5e9", "#ec4899", "#14b8a6", "#f97316", "#64748b"];
@@ -95,6 +103,23 @@
   function platformById(id) { return state.platforms.find((p) => p.id === id) || null; }
 
   function accountCount(pid) { return state.accounts.filter((a) => a.platformId === pid).length; }
+
+  function fmtDate(ts) {
+    if (!ts) return "";
+    const d = new Date(ts * 1000);
+    const now = new Date();
+    if (d.toDateString() === now.toDateString()) {
+      return d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+    }
+    return `${d.getMonth() + 1}月${d.getDate()}日`;
+  }
+
+  function fmtDateTime(ts) {
+    if (!ts) return "";
+    const d = new Date(ts * 1000);
+    const p = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  }
 
   function generatePassword(len = 20, opts = {}) {
     const lower = "abcdefghijkmnopqrstuvwxyz";
@@ -186,11 +211,17 @@
     const data = await api("/api/data");
     state.platforms = data.platforms || [];
     state.accounts = data.accounts || [];
+    state.memos = data.memos || [];
     if (state.activePlatform !== "all" && !platformById(state.activePlatform)) {
       state.activePlatform = "all";
     }
+    if (state.activeMemo && !state.memos.some((m) => m.id === state.activeMemo)) {
+      state.activeMemo = null;
+    }
     renderNav();
     renderAccounts();
+    renderMemoNav();
+    renderMemoEditor();
   }
 
   // ---------------- navigation ----------------
@@ -626,6 +657,157 @@
     });
   }
 
+  // ---------------- view switch ----------------
+  function updateFab() {
+    const fab = $("#fab-add");
+    if (!fab) return;
+    if (state.view === "memos") {
+      fab.innerHTML = `${ICONS.plus}<span>新建备忘录</span>`;
+    } else {
+      fab.innerHTML = `${ICONS.plus}<span>新增账号</span>`;
+    }
+  }
+
+  function setView(view) {
+    state.view = view;
+    const isMemos = view === "memos";
+    $("#sidebar-passwords").classList.toggle("hidden", isMemos);
+    $("#sidebar-memos").classList.toggle("hidden", !isMemos);
+    $("#content-passwords").classList.toggle("hidden", isMemos);
+    $("#content-memos").classList.toggle("hidden", !isMemos);
+    $$(".view-btn").forEach((b) => b.classList.toggle("active", b.dataset.view === view));
+    $("#search").placeholder = isMemos ? "搜索备忘录…" : "搜索平台、账号、邮箱、备注…";
+    closeSidebar();
+    if (isMemos) {
+      renderMemoNav();
+      renderMemoEditor();
+    } else {
+      renderNav();
+      renderAccounts();
+    }
+    updateFab();
+  }
+
+  // ---------------- memos ----------------
+  function visibleMemos() {
+    const q = state.search;
+    return state.memos
+      .filter((m) => !q || ((m.title || "") + " " + (m.content || "")).toLowerCase().includes(q))
+      .sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || (b.updatedAt || 0) - (a.updatedAt || 0));
+  }
+
+  function renderMemoNav() {
+    const nav = $("#memo-nav");
+    if (!nav) return;
+    const memos = visibleMemos();
+    if (memos.length === 0) {
+      nav.innerHTML = `<div class="empty">${state.search ? "没有匹配的备忘录" : "还没有备忘录，点击 + 新建"}</div>`;
+    } else {
+      nav.innerHTML = memos.map((m) => `
+        <div class="nav-item memo-item ${state.activeMemo === m.id ? "active" : ""}" data-memo="${m.id}">
+          <span class="memo-ico">${ICONS.note}</span>
+          <span class="memo-item-body">
+            <span class="name">${esc(m.title || "无标题")}</span>
+            <span class="memo-date">${fmtDate(m.updatedAt)}</span>
+          </span>
+          ${m.pinned ? `<span class="pin">${ICONS.thumbtack}</span>` : ""}
+        </div>`).join("");
+    }
+    $$(".memo-item", nav).forEach((el) => {
+      el.addEventListener("click", () => {
+        state.activeMemo = el.dataset.memo;
+        closeSidebar();
+        renderMemoNav();
+        renderMemoEditor();
+      });
+    });
+  }
+
+  async function persistMemo(id, data, opts = {}) {
+    try {
+      const updated = await api(`/api/memos/${id}`, { method: "PUT", body: data });
+      const i = state.memos.findIndex((m) => m.id === id);
+      if (i >= 0) state.memos[i] = updated;
+      if (!opts.silent && state.activeMemo === id) {
+        const statusEl = $("#memo-status");
+        if (statusEl) statusEl.textContent = "已保存 · " + fmtDateTime(updated.updatedAt);
+      }
+      renderMemoNav();
+      return updated;
+    } catch (err) {
+      toast(err.message, "error");
+      return null;
+    }
+  }
+
+  function renderMemoEditor() {
+    const host = $("#content-memos");
+    if (!host) return;
+    const memo = state.memos.find((m) => m.id === state.activeMemo);
+    if (!memo) {
+      host.innerHTML = `
+        <div class="empty-state">
+          ${ICONS.note}
+          <div class="title">选择或新建一条备忘录</div>
+          <div>备忘录与密码一同加密，安全保存在本机。</div>
+        </div>`;
+      return;
+    }
+    host.innerHTML = `
+      <div class="memo-editor">
+        <div class="memo-toolbar">
+          <input class="memo-title" id="memo-title" placeholder="标题" value="${esc(memo.title)}" />
+          <button class="btn icon ghost ${memo.pinned ? "active" : ""}" id="memo-pin" title="${memo.pinned ? "取消置顶" : "置顶"}">${ICONS.thumbtack}</button>
+          <button class="btn danger" id="memo-delete">${ICONS.trash} 删除</button>
+        </div>
+        <textarea class="memo-content" id="memo-content" placeholder="开始输入…">${esc(memo.content)}</textarea>
+        <div class="memo-status" id="memo-status">${memo.updatedAt ? "更新于 " + fmtDateTime(memo.updatedAt) : ""}</div>
+      </div>`;
+
+    const titleEl = $("#memo-title");
+    const contentEl = $("#memo-content");
+    const statusEl = $("#memo-status");
+
+    const scheduleSave = () => {
+      statusEl.textContent = "正在保存…";
+      clearTimeout(memoSaveTimer);
+      memoSaveTimer = setTimeout(() => {
+        persistMemo(memo.id, { title: titleEl.value, content: contentEl.value, pinned: memo.pinned });
+      }, 700);
+    };
+    titleEl.addEventListener("input", scheduleSave);
+    contentEl.addEventListener("input", scheduleSave);
+
+    $("#memo-pin").addEventListener("click", async () => {
+      const updated = await persistMemo(memo.id, { title: titleEl.value, content: contentEl.value, pinned: !memo.pinned }, { silent: true });
+      if (updated) renderMemoEditor();
+    });
+
+    $("#memo-delete").addEventListener("click", async () => {
+      const ok = await confirmDialog("删除备忘录", `确定删除「${memo.title || "无标题"}」吗？此操作不可恢复。`);
+      if (!ok) return;
+      try {
+        await api(`/api/memos/${memo.id}`, { method: "DELETE" });
+        if (state.activeMemo === memo.id) state.activeMemo = null;
+        await loadData();
+        toast("已删除", "success");
+      } catch (err) { toast(err.message, "error"); }
+    });
+  }
+
+  async function createMemo() {
+    try {
+      const memo = await api("/api/memos", { method: "POST", body: { title: "", content: "", pinned: false } });
+      state.memos.push(memo);
+      state.activeMemo = memo.id;
+      state.search = "";
+      $("#search").value = "";
+      renderMemoNav();
+      renderMemoEditor();
+      setTimeout(() => $("#memo-title")?.focus(), 40);
+    } catch (err) { toast(err.message, "error"); }
+  }
+
   // ---------------- settings ----------------
   function openSettings() {
     const body = `
@@ -721,19 +903,27 @@
   async function init() {
     $("#auth-form").addEventListener("submit", handleAuthSubmit);
     $("#btn-add-account").addEventListener("click", () => openAccountModal(null));
-    $("#fab-add").addEventListener("click", () => openAccountModal(null));
+    $("#fab-add").addEventListener("click", () => {
+      if (state.view === "memos") createMemo();
+      else openAccountModal(null);
+    });
     $("#btn-add-platform").addEventListener("click", () => openPlatformModal(null));
+    $("#btn-add-memo").addEventListener("click", createMemo);
+    $$(".view-btn").forEach((btn) => btn.addEventListener("click", () => setView(btn.dataset.view)));
     $("#btn-settings").addEventListener("click", openSettings);
     $("#btn-lock").addEventListener("click", async () => {
       try { await api("/api/lock", { method: "POST" }); } catch {}
       state.unlocked = false;
       state.accounts = [];
       state.platforms = [];
+      state.memos = [];
+      state.activeMemo = null;
       renderAuth();
     });
     $("#search").addEventListener("input", (e) => {
       state.search = e.target.value.trim().toLowerCase();
-      renderAccounts();
+      if (state.view === "memos") renderMemoNav();
+      else renderAccounts();
     });
     $("#menu-toggle").addEventListener("click", openSidebar);
     window.addEventListener("resize", updateResponsive);

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="color-scheme" content="light" />
   <title>PassVault 密码管家</title>
-  <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/styles.css?v=1.2.0" />
 </head>
 <body>
   <!-- 解锁 / 初始化 -->
@@ -64,26 +64,50 @@
 
     <div class="layout">
       <aside class="sidebar" id="sidebar">
-        <div class="sidebar-head">
-          <span>平台</span>
-          <button class="btn icon ghost" id="btn-add-platform" title="新增平台">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg>
+        <div class="view-switch">
+          <button class="view-btn active" type="button" data-view="passwords">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="10" width="18" height="11" rx="2.5"></rect><path d="M7 10V7a5 5 0 0 1 10 0v3"></path></svg>
+            密码
+          </button>
+          <button class="view-btn" type="button" data-view="memos">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><path d="M14 3v6h6M8 13h8M8 17h5"></path></svg>
+            备忘录
           </button>
         </div>
-        <div id="platform-nav"></div>
+        <div id="sidebar-passwords">
+          <div class="sidebar-head">
+            <span>平台</span>
+            <button class="btn icon ghost" id="btn-add-platform" title="新增平台">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg>
+            </button>
+          </div>
+          <div id="platform-nav"></div>
+        </div>
+        <div id="sidebar-memos" class="hidden">
+          <div class="sidebar-head">
+            <span>备忘录</span>
+            <button class="btn icon ghost" id="btn-add-memo" title="新建备忘录">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg>
+            </button>
+          </div>
+          <div id="memo-nav"></div>
+        </div>
       </aside>
 
       <main class="content">
-        <div class="content-head">
-          <h2 id="content-title">全部账号</h2>
-          <span class="meta" id="content-meta"></span>
-          <span class="spacer"></span>
-          <button class="btn" id="btn-add-account">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg>
-            新增账号
-          </button>
+        <div id="content-passwords">
+          <div class="content-head">
+            <h2 id="content-title">全部账号</h2>
+            <span class="meta" id="content-meta"></span>
+            <span class="spacer"></span>
+            <button class="btn" id="btn-add-account">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg>
+              新增账号
+            </button>
+          </div>
+          <div id="account-list"></div>
         </div>
-        <div id="account-list"></div>
+        <div id="content-memos" class="hidden"></div>
       </main>
     </div>
 
@@ -96,6 +120,6 @@
   <div id="modal-root"></div>
   <div id="toast-root"></div>
 
-  <script src="/app.js"></script>
+  <script src="/app.js?v=1.2.0"></script>
 </body>
 </html>

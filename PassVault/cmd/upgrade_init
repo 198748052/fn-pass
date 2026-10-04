@@ -1,5 +1,11 @@
 #!/bin/bash
 
 ### This script is called before the user upgrades the application.
+### Stop the running service so the upgraded version can bind the port cleanly.
+
+CMD_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ -x "${CMD_DIR}/main" ]; then
+    "${CMD_DIR}/main" stop >/dev/null 2>&1 || true
+fi
 
 exit 0

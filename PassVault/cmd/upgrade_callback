@@ -1,5 +1,11 @@
 #!/bin/bash
 
 ### This script is called after the user upgrades the application.
+### Start the upgraded service.
+
+CMD_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ -x "${CMD_DIR}/main" ]; then
+    "${CMD_DIR}/main" start >/dev/null 2>&1 || true
+fi
 
 exit 0

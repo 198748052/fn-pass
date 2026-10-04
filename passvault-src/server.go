@@ -42,6 +42,10 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("PUT /api/accounts/{id}", a.requireAuth(a.handleUpdateAccount))
 	mux.HandleFunc("DELETE /api/accounts/{id}", a.requireAuth(a.handleDeleteAccount))
 
+	mux.HandleFunc("POST /api/memos", a.requireAuth(a.handleCreateMemo))
+	mux.HandleFunc("PUT /api/memos/{id}", a.requireAuth(a.handleUpdateMemo))
+	mux.HandleFunc("DELETE /api/memos/{id}", a.requireAuth(a.handleDeleteMemo))
+
 	mux.Handle("/", a.staticHandler())
 
 	return securityHeaders(mux)
@@ -428,6 +432,90 @@ func (a *App) handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.vault.Accounts = append(a.vault.Accounts[:idx], a.vault.Accounts[idx+1:]...)
+	err := a.saveLocked()
+	a.mu.Unlock()
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// ---- memos ----
+
+func (a *App) handleCreateMemo(w http.ResponseWriter, r *http.Request) {
+	var body Memo
+	if !decodeBody(w, r, &body) {
+		return
+	}
+	body.Title = strings.TrimSpace(body.Title)
+	a.mu.Lock()
+	if a.vault == nil {
+		a.mu.Unlock()
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "locked"})
+		return
+	}
+	body.ID = newID()
+	body.CreatedAt = nowUnix()
+	body.UpdatedAt = body.CreatedAt
+	a.vault.Memos = append(a.vault.Memos, body)
+	err := a.saveLocked()
+	a.mu.Unlock()
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, body)
+}
+
+func (a *App) handleUpdateMemo(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var body Memo
+	if !decodeBody(w, r, &body) {
+		return
+	}
+	a.mu.Lock()
+	if a.vault == nil {
+		a.mu.Unlock()
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "locked"})
+		return
+	}
+	idx := findMemo(a.vault, id)
+	if idx < 0 {
+		a.mu.Unlock()
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "备忘录不存在"})
+		return
+	}
+	cur := a.vault.Memos[idx]
+	cur.Title = strings.TrimSpace(body.Title)
+	cur.Content = body.Content
+	cur.Pinned = body.Pinned
+	cur.UpdatedAt = nowUnix()
+	a.vault.Memos[idx] = cur
+	err := a.saveLocked()
+	a.mu.Unlock()
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, cur)
+}
+
+func (a *App) handleDeleteMemo(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	a.mu.Lock()
+	if a.vault == nil {
+		a.mu.Unlock()
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "locked"})
+		return
+	}
+	idx := findMemo(a.vault, id)
+	if idx < 0 {
+		a.mu.Unlock()
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "备忘录不存在"})
+		return
+	}
+	a.vault.Memos = append(a.vault.Memos[:idx], a.vault.Memos[idx+1:]...)
 	err := a.saveLocked()
 	a.mu.Unlock()
 	if err != nil {

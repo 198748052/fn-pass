@@ -1,5 +1,5 @@
 appname=PassVault
-version=1.0.0
+version=1.2.0
 display_name=密码管家
 desc=本地加密的密码与账号管理器。支持自定义平台、一个平台下保存多个账号，并为每个账号补充邮箱、密保、API Key 等自定义字段。
 source=thirdparty

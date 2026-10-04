@@ -65,11 +65,22 @@ type Account struct {
 	UpdatedAt  int64   `json:"updatedAt"`
 }
 
+// Memo is a free-form encrypted note kept alongside credentials.
+type Memo struct {
+	ID        string `json:"id"`
+	Title     string `json:"title"`
+	Content   string `json:"content"`
+	Pinned    bool   `json:"pinned"`
+	CreatedAt int64  `json:"createdAt"`
+	UpdatedAt int64  `json:"updatedAt"`
+}
+
 // Vault is the decrypted in-memory representation of all user data.
 type Vault struct {
 	Version   int        `json:"version"`
 	Platforms []Platform `json:"platforms"`
 	Accounts  []Account  `json:"accounts"`
+	Memos     []Memo     `json:"memos"`
 }
 
 // vaultFile is the encrypted on-disk representation.
@@ -83,7 +94,7 @@ type vaultFile struct {
 }
 
 func newVault() *Vault {
-	return &Vault{Version: vaultVersion, Platforms: []Platform{}, Accounts: []Account{}}
+	return &Vault{Version: vaultVersion, Platforms: []Platform{}, Accounts: []Account{}, Memos: []Memo{}}
 }
 
 func (v *Vault) normalize() {
@@ -111,6 +122,9 @@ func (v *Vault) normalize() {
 		for j := range v.Accounts[i].Fields {
 			ensureFieldDefaults(&v.Accounts[i].Fields[j])
 		}
+	}
+	if v.Memos == nil {
+		v.Memos = []Memo{}
 	}
 }
 
@@ -256,12 +270,27 @@ func findAccount(v *Vault, id string) int {
 	return -1
 }
 
+func findMemo(v *Vault, id string) int {
+	for i := range v.Memos {
+		if v.Memos[i].ID == id {
+			return i
+		}
+	}
+	return -1
+}
+
 func sortVault(v *Vault) {
 	sort.SliceStable(v.Platforms, func(i, j int) bool {
 		return v.Platforms[i].CreatedAt < v.Platforms[j].CreatedAt
 	})
 	sort.SliceStable(v.Accounts, func(i, j int) bool {
 		return v.Accounts[i].UpdatedAt > v.Accounts[j].UpdatedAt
+	})
+	sort.SliceStable(v.Memos, func(i, j int) bool {
+		if v.Memos[i].Pinned != v.Memos[j].Pinned {
+			return v.Memos[i].Pinned
+		}
+		return v.Memos[i].UpdatedAt > v.Memos[j].UpdatedAt
 	})
 }
 
