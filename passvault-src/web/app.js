@@ -13,11 +13,18 @@
     memos: [],
     activePlatform: "all",
     activeMemo: null,
+    memoEditing: false,
     view: "passwords",
     search: "",
   };
 
   let memoSaveTimer = null;
+
+  const TOKEN_KEY = "pv_token";
+  const tokenStore = {
+    get() { try { return localStorage.getItem(TOKEN_KEY) || ""; } catch { return ""; } },
+    set(t) { try { if (t) localStorage.setItem(TOKEN_KEY, t); else localStorage.removeItem(TOKEN_KEY); } catch {} },
+  };
 
   const ICONS = {
     key: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="7.5" cy="15.5" r="4.5"></circle><path d="m10.5 12.5 8-8M16 5l3 3M14 7l3 3"></path></svg>',
@@ -31,6 +38,7 @@
     vault: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2.5"></rect><circle cx="12" cy="12" r="4"></circle><path d="M12 8v1M12 15v1M8 12h1M15 12h1"></path></svg>',
     layers: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 2 9 5-9 5-9-5 9-5z"></path><path d="m3 12 9 5 9-5"></path><path d="m3 17 9 5 9-5"></path></svg>',
     plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg>',
+    check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg>',
     note: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><path d="M14 3v6h6M8 13h8M8 17h5"></path></svg>',
     thumbtack: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4h6l-1 6 3 3v2H7v-2l3-3-1-6z"></path><path d="M12 15v5"></path></svg>',
   };
@@ -48,8 +56,11 @@
       opts.body = JSON.stringify(opts.body);
       opts.headers = { "Content-Type": "application/json", ...(opts.headers || {}) };
     }
+    const tok = tokenStore.get();
+    if (tok) opts.headers = { Authorization: `Bearer ${tok}`, ...(opts.headers || {}) };
     const res = await fetch(path, opts);
     if (res.status === 401) {
+      tokenStore.set("");
       state.unlocked = false;
       renderAuth();
       throw new Error("会话已锁定，请重新解锁");
@@ -187,10 +198,12 @@
         const confirm = $("#auth-confirm").value;
         if (pw.length < 6) { errEl.textContent = "主密码至少需要 6 个字符"; return; }
         if (pw !== confirm) { errEl.textContent = "两次输入的密码不一致"; return; }
-        await api("/api/setup", { method: "POST", body: { master: pw } });
+        const res = await api("/api/setup", { method: "POST", body: { master: pw } });
+        if (res && res.token) tokenStore.set(res.token);
         state.initialized = true;
       } else {
-        await api("/api/unlock", { method: "POST", body: { master: pw } });
+        const res = await api("/api/unlock", { method: "POST", body: { master: pw } });
+        if (res && res.token) tokenStore.set(res.token);
       }
       state.unlocked = true;
       await enterApp();
@@ -217,11 +230,12 @@
     }
     if (state.activeMemo && !state.memos.some((m) => m.id === state.activeMemo)) {
       state.activeMemo = null;
+      state.memoEditing = false;
     }
     renderNav();
     renderAccounts();
     renderMemoNav();
-    renderMemoEditor();
+    renderMemoView();
   }
 
   // ---------------- navigation ----------------
@@ -662,8 +676,15 @@
     const fab = $("#fab-add");
     if (!fab) return;
     if (state.view === "memos") {
-      fab.innerHTML = `${ICONS.plus}<span>新建备忘录</span>`;
+      if (state.memoEditing) {
+        fab.classList.add("fab-save");
+        fab.innerHTML = `${ICONS.check}<span>完成并保存</span>`;
+      } else {
+        fab.classList.remove("fab-save");
+        fab.innerHTML = `${ICONS.plus}<span>新建备忘录</span>`;
+      }
     } else {
+      fab.classList.remove("fab-save");
       fab.innerHTML = `${ICONS.plus}<span>新增账号</span>`;
     }
   }
@@ -679,8 +700,10 @@
     $("#search").placeholder = isMemos ? "搜索备忘录…" : "搜索平台、账号、邮箱、备注…";
     closeSidebar();
     if (isMemos) {
+      state.memoEditing = false;
+      state.activeMemo = null;
       renderMemoNav();
-      renderMemoEditor();
+      renderMemoView();
     } else {
       renderNav();
       renderAccounts();
@@ -696,6 +719,23 @@
       .sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || (b.updatedAt || 0) - (a.updatedAt || 0));
   }
 
+  function openMemo(id) {
+    state.activeMemo = id;
+    state.memoEditing = true;
+    closeSidebar();
+    renderMemoNav();
+    renderMemoView();
+    updateFab();
+  }
+
+  function closeMemoEditor() {
+    state.memoEditing = false;
+    state.activeMemo = null;
+    renderMemoNav();
+    renderMemoView();
+    updateFab();
+  }
+
   function renderMemoNav() {
     const nav = $("#memo-nav");
     if (!nav) return;
@@ -704,7 +744,7 @@
       nav.innerHTML = `<div class="empty">${state.search ? "没有匹配的备忘录" : "还没有备忘录，点击 + 新建"}</div>`;
     } else {
       nav.innerHTML = memos.map((m) => `
-        <div class="nav-item memo-item ${state.activeMemo === m.id ? "active" : ""}" data-memo="${m.id}">
+        <div class="nav-item memo-item ${state.activeMemo === m.id && state.memoEditing ? "active" : ""}" data-memo="${m.id}">
           <span class="memo-ico">${ICONS.note}</span>
           <span class="memo-item-body">
             <span class="name">${esc(m.title || "无标题")}</span>
@@ -714,12 +754,7 @@
         </div>`).join("");
     }
     $$(".memo-item", nav).forEach((el) => {
-      el.addEventListener("click", () => {
-        state.activeMemo = el.dataset.memo;
-        closeSidebar();
-        renderMemoNav();
-        renderMemoEditor();
-      });
+      el.addEventListener("click", () => openMemo(el.dataset.memo));
     });
   }
 
@@ -740,19 +775,67 @@
     }
   }
 
-  function renderMemoEditor() {
+  async function flushMemoSave() {
+    clearTimeout(memoSaveTimer);
+    memoSaveTimer = null;
+    const memo = state.memos.find((m) => m.id === state.activeMemo);
+    if (!memo) return null;
+    const titleEl = $("#memo-title");
+    const contentEl = $("#memo-content");
+    if (!titleEl && !contentEl) return null;
+    return persistMemo(memo.id, {
+      title: titleEl ? titleEl.value : memo.title,
+      content: contentEl ? contentEl.value : memo.content,
+      pinned: memo.pinned,
+    }, { silent: true });
+  }
+
+  function renderMemoView() {
+    const memo = state.memos.find((m) => m.id === state.activeMemo);
+    if (state.memoEditing && memo) renderMemoEditor(memo);
+    else renderMemoCards();
+  }
+
+  function renderMemoCards() {
     const host = $("#content-memos");
     if (!host) return;
-    const memo = state.memos.find((m) => m.id === state.activeMemo);
-    if (!memo) {
-      host.innerHTML = `
+    const memos = visibleMemos();
+    const head = `
+      <div class="content-head">
+        <h2>备忘录</h2>
+        <span class="meta">${memos.length} 条</span>
+      </div>`;
+    if (memos.length === 0) {
+      host.innerHTML = head + `
         <div class="empty-state">
           ${ICONS.note}
-          <div class="title">选择或新建一条备忘录</div>
-          <div>备忘录与密码一同加密，安全保存在本机。</div>
+          <div class="title">${state.search ? "没有匹配的备忘录" : "还没有备忘录"}</div>
+          <div>${state.search ? "试试其它关键词" : "点击右下角「新建备忘录」开始记录"}</div>
         </div>`;
       return;
     }
+    host.innerHTML = head + `<div class="memo-cards">${memos.map((m) => {
+      const preview = (m.content || "").replace(/\s+/g, " ").trim();
+      return `
+        <div class="memo-card ${m.pinned ? "pinned" : ""}" data-memo="${m.id}">
+          <div class="memo-card-head">
+            <span class="memo-card-ico">${ICONS.note}</span>
+            <span class="memo-card-title">${esc(m.title || "无标题")}</span>
+            ${m.pinned ? `<span class="memo-card-pin">${ICONS.thumbtack}</span>` : ""}
+          </div>
+          <div class="memo-card-preview">${preview ? esc(preview) : '<span class="muted">暂无内容</span>'}</div>
+          <div class="memo-card-date">${m.updatedAt ? "更新于 " + fmtDate(m.updatedAt) : "尚未编辑"}</div>
+        </div>`;
+    }).join("")}</div>`;
+    $$(".memo-card", host).forEach((card) => {
+      card.addEventListener("click", () => openMemo(card.dataset.memo));
+    });
+  }
+
+  function renderMemoEditor(memo) {
+    const host = $("#content-memos");
+    if (!host) return;
+    if (!memo) { renderMemoCards(); return; }
     host.innerHTML = `
       <div class="memo-editor">
         <div class="memo-toolbar">
@@ -779,17 +862,23 @@
     contentEl.addEventListener("input", scheduleSave);
 
     $("#memo-pin").addEventListener("click", async () => {
+      clearTimeout(memoSaveTimer);
+      memoSaveTimer = null;
       const updated = await persistMemo(memo.id, { title: titleEl.value, content: contentEl.value, pinned: !memo.pinned }, { silent: true });
-      if (updated) renderMemoEditor();
+      if (updated) renderMemoEditor(updated);
     });
 
     $("#memo-delete").addEventListener("click", async () => {
       const ok = await confirmDialog("删除备忘录", `确定删除「${memo.title || "无标题"}」吗？此操作不可恢复。`);
       if (!ok) return;
+      clearTimeout(memoSaveTimer);
+      memoSaveTimer = null;
       try {
         await api(`/api/memos/${memo.id}`, { method: "DELETE" });
-        if (state.activeMemo === memo.id) state.activeMemo = null;
+        state.activeMemo = null;
+        state.memoEditing = false;
         await loadData();
+        updateFab();
         toast("已删除", "success");
       } catch (err) { toast(err.message, "error"); }
     });
@@ -800,10 +889,12 @@
       const memo = await api("/api/memos", { method: "POST", body: { title: "", content: "", pinned: false } });
       state.memos.push(memo);
       state.activeMemo = memo.id;
+      state.memoEditing = true;
       state.search = "";
       $("#search").value = "";
       renderMemoNav();
-      renderMemoEditor();
+      renderMemoView();
+      updateFab();
       setTimeout(() => $("#memo-title")?.focus(), 40);
     } catch (err) { toast(err.message, "error"); }
   }
@@ -854,7 +945,8 @@
           if (n1.length < 6) { toast("新密码至少 6 位", "error"); return; }
           if (n1 !== n2) { toast("两次输入不一致", "error"); return; }
           try {
-            await api("/api/master", { method: "POST", body: { old: oldPw, new: n1 } });
+            const res = await api("/api/master", { method: "POST", body: { old: oldPw, new: n1 } });
+            if (res && res.token) tokenStore.set(res.token);
             close();
             toast("主密码已更新", "success");
           } catch (err) { toast(err.message, "error"); }
@@ -903,9 +995,18 @@
   async function init() {
     $("#auth-form").addEventListener("submit", handleAuthSubmit);
     $("#btn-add-account").addEventListener("click", () => openAccountModal(null));
-    $("#fab-add").addEventListener("click", () => {
-      if (state.view === "memos") createMemo();
-      else openAccountModal(null);
+    $("#fab-add").addEventListener("click", async () => {
+      if (state.view === "memos") {
+        if (state.memoEditing) {
+          await flushMemoSave();
+          closeMemoEditor();
+          toast("已保存", "success");
+        } else {
+          createMemo();
+        }
+      } else {
+        openAccountModal(null);
+      }
     });
     $("#btn-add-platform").addEventListener("click", () => openPlatformModal(null));
     $("#btn-add-memo").addEventListener("click", createMemo);
@@ -913,17 +1014,23 @@
     $("#btn-settings").addEventListener("click", openSettings);
     $("#btn-lock").addEventListener("click", async () => {
       try { await api("/api/lock", { method: "POST" }); } catch {}
+      tokenStore.set("");
       state.unlocked = false;
       state.accounts = [];
       state.platforms = [];
       state.memos = [];
       state.activeMemo = null;
+      state.memoEditing = false;
       renderAuth();
     });
     $("#search").addEventListener("input", (e) => {
       state.search = e.target.value.trim().toLowerCase();
-      if (state.view === "memos") renderMemoNav();
-      else renderAccounts();
+      if (state.view === "memos") {
+        renderMemoNav();
+        if (!state.memoEditing) renderMemoCards();
+      } else {
+        renderAccounts();
+      }
     });
     $("#menu-toggle").addEventListener("click", openSidebar);
     window.addEventListener("resize", updateResponsive);

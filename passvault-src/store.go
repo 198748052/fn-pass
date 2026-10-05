@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	sessionTTL       = 30 * time.Minute
+	sessionTTL       = 24 * time.Hour
 	sessionReapEvery = 5 * time.Minute
 )
 
